@@ -1,0 +1,25 @@
+{
+  "name": "wang-personal-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "个人主页：关于我 / 学习记录 / 一键去除图片背景（浏览器本地模型 或 Replicate 后端）",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node tools/check.js",
+    "check:local": "node tools/check-local.js",
+    "check:removebg": "node tools/check-removebg.js",
+    "check:token": "node tools/check-token.js",
+    "check:e2e": "node tools/check-e2e.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "replicate": "^1.4.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}
