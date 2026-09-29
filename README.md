@@ -14,6 +14,11 @@
 
 ## 快速开始
 
+**只想看页面 / 直接用：双击 `index.html` 就行。** 三屏都能用，第三屏走浏览器本地模型，
+不需要装任何东西、不需要 token。（模型首次用时从 CDN 下 6.6MB。）
+
+下面这套是**想走 Replicate 那条路**（抠图质量更好）才需要的：
+
 ```bash
 npm install              # 装依赖
 cp .env.example .env     # 然后编辑 .env，填入你的 REPLICATE_API_TOKEN
@@ -28,8 +33,6 @@ Token 在这里申请：<https://replicate.com/account/api-tokens>
 `npm run check:token` 会读 `.env`、真发一次认证请求，并且把常见的复制毛病指出来
 （多带了空格 / 前后有换行 / 长度不对被截断 / 压根没配），认证通过时打印账号名。
 比「启动服务、传张图、看报错」快得多。
-
-只想看前两屏的话，直接双击 `index.html` 也行（天气照样有）；但第三屏必须由 `server.js` 提供服务。
 
 ## 第三屏的两条路（打开页面时自动选）
 
@@ -65,6 +68,27 @@ tools/
   make-avatar.py                  从原照片裁正方形头像
   screenshots/                    自检产出的截图（可随时删，重跑会再生成）
 ```
+
+## 浏览器本地那条路用的模型
+
+`index.html` 顶部 script 里两行常量：
+
+```js
+var TF_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+var MODEL_ID = 'Xenova/modnet';
+```
+
+- 运行时是 **transformers.js 3.8.1**（Apache-2.0），模型是 **MODNet**，Apache-2.0。
+  **许可证很重要**：这类工具最常被推荐的 `briaai/RMBG-1.4` 是**非商用**许可，放公开仓库要当心。
+- 加载 `dtype: 'q8'` 拿的是量化版权重，**6.6MB**（`model_quantized.onnx`）；
+  换成 `'fp32'` 是 25MB，质量略好，但首次打开慢很多。
+- MODNet 是为**人像抠图**训练的，抠真人照片、半透明发丝是强项；抠商品、食物这类
+  非人主体时边缘会弱一些 —— 这种图建议走后端那条 Replicate（实测确实更干净）。
+- 入参名的坑：processor 输出叫 `pixel_values`，但模型要的键名是 `input`，
+  写成 `model(inputs)` 会报 `Missing the following inputs: input`。
+- 输出是一张 `[1,1,512,512]` 的 float32 alpha 遮罩。代码没用 `RawImage.putAlpha`，
+  而是把遮罩画成只带 alpha 的 canvas、再用 `destination-in` 叠回原图 ——
+  这样缩放时浏览器会做插值，边缘更顺，而且不依赖库的具体 API 形态。
 
 ## 模型与端点（有个坑，换模型前必读）
 
@@ -126,7 +150,9 @@ GET  /api/health        返回 { ok, tokenConfigured, model }，前端用它提�
 | 昵称、介绍、兴趣、学习目标 | `index.html` 里搜「改这里」 |
 | 学习记录 | 复制一整块 `<div class="item">…</div>`；最新那条加 `now` 类名和 `<span class="badge">最新</span>` |
 | 天气城市 | `index.html` 底部 script 里的 `var CITY = { name, lat, lon }` |
-| 去背景用的模型 | `server.js` 顶部的 `MODEL`，**必须写成 `owner/name:版本hash`**（只写 `owner/name` 会 404，见上一节） |
+| 浏览器本地那个模型的库 / 模型 | `index.html` 第三屏 script 顶部的 `TF_CDN`、`MODEL_ID`、`MODEL_MB` |
+| 怎么决定走哪条路 | `index.html` 第三屏 script 最末尾那段 `location.protocol === 'file:'` + `fetch('/api/health')` 判断 |
+| 去背景用的模型（后端那条路） | `server.js` 顶部的 `MODEL`，**必须写成 `owner/name:版本hash`**（只写 `owner/name` 会 404，见上一节） |
 | 上传大小上限 / 端口 | `server.js` 顶部的 `MAX_MB`、环境变量 `PORT` |
 
 ## 自检
@@ -153,16 +179,13 @@ npm run check:e2e               # 真实端到端：真调 Replicate 模型抠�
 
 `check.js` 里有一段**窄屏横向裁切扫描**：从 1440 到 320 逐档量 `scrollWidth > clientWidth`。
 只查 `overflow` 不是 `visible` 的元素 —— 那种才会真把内容藏起来。这条是因为踩过坑才加的：
-第三屏说明卡的命令行块原来用 `<pre>` + `white-space:pre` + `overflow-x:auto`，
+原来第三屏那张说明卡里的命令行块用了 `<pre>` + `white-space:pre` + `overflow-x:auto`，
 在 ≤600px 时内容宽 519px、可视只有 290px，**三分之一滚出视野，而 macOS 不显示滚动条，看起来就是文字被硬裁掉**。
 （注意 `.avatar-ring` 那种自转圆环 `scrollWidth` 会抖动，但它 `overflow:visible` 什么都不裁，必须排除，否则误报。）
 
-`check-removebg.js` 的 A 场景打的是真后端（token 好就真出图，坏就失败，两种都算通过，但状态必须明确）；
-B 场景用 mock 响应测渲染，所以不管 token 好不好用都能验证前端成功态。
-
 **别对真实网络调用用固定等待时间。** 这里踩过：脚本原来"等 4 秒"就断言按钮复位，
 token 不行时 401 秒回所以看不出问题，token 一通真的开始跑模型要 5 秒多，立刻就误报。
-现在改成轮询按钮状态，超时给 90 秒。
+现在一律轮询目标状态，超时给到分钟级（浏览器首次下模型要 3–8 秒）。
 
 依赖 `playwright-core`（已在 devDependencies）+ 本机的 Google Chrome。
 
@@ -181,11 +204,15 @@ token 不行时 401 秒回所以看不出问题，token 一通真的开始跑模
 
 ## 部署提醒
 
-第三屏需要 Node 运行时，**GitHub Pages / 纯静态托管跑不了**。
+**第三屏不再需要 Node 运行时了。** 没后端时它自动走浏览器本地模型，所以：
 
-- 只想放静态的前两屏：把 `index.html` + `avatar.jpg` 传上去就行，第三屏会自动降级成说明卡。
-- 要完整的：部署到能跑 Node 的平台（Render、Railway、Vercel 之类），
-  设好环境变量 `REPLICATE_API_TOKEN` 和 `HOST=0.0.0.0`。
+- **GitHub Pages / 任何纯静态托管**：把 `index.html` + `avatar.jpg` 传上去就行，第三屏直接可用。
+- **想要 Replicate 那条路**（质量更好）：部署到能跑 Node 的平台（Render、Railway 之类），
+  设好环境变量 `REPLICATE_API_TOKEN` 和 `HOST=0.0.0.0`，页面会自动检测到并切换过去。
+
+浏览器本地那条路会从两个 CDN 取东西（首次访问时）：`cdn.jsdelivr.net` 取运行库、
+`huggingface.co` 取模型权重。**如果你的访客网络访问不了这两个域名，那条路就用不了** ——
+想彻底自包含，可以把库和模型下下来放同目录，改 `index.html` 里的 `TF_CDN` / 用 `publicPath` 指过去。
 
 默认只监听 `127.0.0.1`（本机），是为了避免同一局域网下别人也能用你的 token 烧额度。
 
